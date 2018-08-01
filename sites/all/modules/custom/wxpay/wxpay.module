@@ -1,0 +1,21 @@
+<?php
+
+/**
+Implements hook_menu().
+*/
+function wxpay_menu(){
+  $items = array();
+  $items['wxpay/index'] = array(
+
+    'title' => 'hello',
+    'page callback' => 'wxpay_index_page',
+    'access callback' => TRUE,
+  );
+
+  return $items;
+
+}
+function wxpay_index_page(){
+
+  return 'hello';
+}
