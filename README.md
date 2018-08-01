@@ -1,2 +1,0 @@
-# aplan
-A plan
