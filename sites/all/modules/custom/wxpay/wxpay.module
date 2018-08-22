@@ -3,13 +3,23 @@
 /**
 Implements hook_menu().
 */
+
+
+
+
 function wxpay_menu(){
   $items = array();
-  $items['wxpay/index'] = array(
-
+  $items['wxpay/index.php'] = array(
     'title' => 'hello',
     'page callback' => 'wxpay_index_page',
     'access callback' => TRUE,
+
+  );
+  $items['native.php'] = array(
+    'title' => 'Native pay',
+    'page callback' => 'wxpay_native_page',
+    'access callback' => TRUE,
+    'file' => 'wxpay.payment.inc',
   );
 
   return $items;
@@ -17,5 +27,16 @@ function wxpay_menu(){
 }
 function wxpay_index_page(){
 
-  return 'hello';
+  return array(
+    '#theme' => 'item_list',
+    '#items' => array(
+       l('JSAPI支付', 'jsapi.php'),
+       l('刷卡支付', 'micropay.php'),
+       l('扫码支付', 'native.php'),
+       l('订单查询', 'orderquery.php'),
+       l('订单退款', 'refund.php'),
+       l('退款查询', 'refundquery.php'),
+       l('下载订单', 'download.php'),
+    ),
+  );
 }
