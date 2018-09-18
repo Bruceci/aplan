@@ -1,8 +1,8 @@
 <?php
-const APPID = 'wx17b5872ac9c378bf';
-const SECRET = 'd8c98939c0746e715b53293eccdbee39';
-const MCH_ID = '1512253241';
-const MCH_KEY = '12q2w23ed443e3r5h8km987u6yt5r43d';
+const APPID = 'wxb6c74c1f97c5a72e';
+const SECRET = '0a35f4a623dfe98f7bdd8d9d1098a084';
+const MCH_ID = '1511838561';
+const MCH_KEY = '34r4eju78io986543ju8765r87uvbnx6';
 const UNIFIED_API =  'https://api.mch.weixin.qq.com/pay/unifiedorder';
 const SESSION_API = 'https://api.weixin.qq.com/sns/jscode2session';
 const KEY = '12345678';
