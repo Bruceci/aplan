@@ -1,0 +1,99 @@
+<?php
+const APPID = 'wx17b5872ac9c378bf';
+const SECRET = 'd8c98939c0746e715b53293eccdbee39';
+const MCH_ID = '1512253241';
+const MCH_KEY = '12q2w23ed443e3r5h8km987u6yt5r43d';
+const UNIFIED_API =  'https://api.mch.weixin.qq.com/pay/unifiedorder';
+const SESSION_API = 'https://api.weixin.qq.com/sns/jscode2session';
+const KEY = '12345678';
+variable_set('notify_url', 'https://0376866.com/wait_notify');
+include 'utility/utility.inc';
+include 'common/common.inc';
+function weixinpay_menu(){
+  $items = array();
+  $items['checkout/pay'] = array(
+    'title' => 'Checkout',
+    'page callback' => 'weixinpay_checkout_pay_callback',
+    'access callback' => TRUE,
+    'type' => MENU_CALLBACK,
+    'file' => 'weixinpay.pay.inc',
+    'file path' => drupal_get_path('module', 'weixinpay') . '/include'
+
+  );
+  $items['wait_notify'] = array(
+    'title' => 'Waitting Weipay result notify',
+    'page callback' => 'weixinpay_wait_notify_callback',
+    'access callback' => TRUE,
+    'type' => MENU_CALLBACK,
+    'file' => 'weixinpay.notify.inc',
+    'file path' => drupal_get_path('module', 'weixinpay') . '/include'
+
+  );
+  $items['wxlogin'] = array(
+    'title' => 'Wei xin Login',
+    'page callback' => 'weixin_login_callback',
+    'access callback' => TRUE,
+    'type' => MENU_CALLBACK,
+    'file' => 'weixin.login.inc',
+    'file path' => drupal_get_path('module', 'weixinpay') . '/include'
+
+  );
+  $items['wxuserupdate'] = array(
+    'title' => 'Wei xin user update',
+    'page callback' => 'weixin_user_update_callback',
+    'access callback' => TRUE,
+    'type' => MENU_CALLBACK,
+    'file' => 'weixin.login.inc',
+    'file path' => drupal_get_path('module', 'weixinpay'). '/include'
+  );
+  $items['updatenozzle'] = array(
+    'title' => 'Update Nozzle',
+    'page callback' => 'weixin_update_nozzle_callback',
+    'access callback' => TRUE,
+    'type' => MENU_CALLBACK,
+    'file' => 'weixin.updates.inc',
+    'file path' => drupal_get_path('module', 'weixinpay'). '/include'
+  );
+  $items['getrecords'] = array(
+    'title' => 'Pay Records',
+    'page callback' => 'weixin_payrecords_callback',
+    'access callback' => TRUE,
+    'type' => MENU_CALLBACK,
+    'file' => 'weixin.payrecord.inc',
+    'file path' => drupal_get_path('module', 'weixinpay'). '/include'
+  );
+  $items['updatedetect'] = array(
+    'title' => 'Update Detect',
+    'page callback' => 'wixin_update_detect_callback',
+    'access callback' => TRUE,
+    'type' => MENU_CALLBACK,
+    'file' => 'weixin.updates.inc',
+    'file path' => drupal_get_path('module', 'weixinpay'). '/include'
+  );
+  $items['test'] = array(
+    'title' => 'Testing',
+    'page callback' => 'test_callback',
+    'access callback' => TRUE,
+    'type' => MENU_CALLBACK
+  );
+  return $items;
+}
+
+function test_callback(){
+ $node = node_load(125);
+ if(array() == false){
+   dpm('yes');
+ }
+dpm($node);
+return 'hello';
+}
+function weixinpay_node_update($node){
+  if($node->type == 'nozzle'){
+    variable_set('weixin_nozzles_change', time());
+  }
+}
+function weixinpay_node_delete($node){
+  if($node->type == 'nozzle'){
+    variable_set('weixin_nozzles_change', time());
+  }
+}
