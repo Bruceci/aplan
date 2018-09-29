@@ -28,11 +28,3 @@ function weixin_update_nozzle_callback(){
     drupal_json_output($return);
 
 }
-function wixin_update_detect_callback(){
-  $change = variable_get('weixin_nozzles_change', 0);
-  $return = array(
-    'change' => $change,
-  );
-  variable_del('weixin_nozzles_changed');
-  drupal_json_output($return);
-}

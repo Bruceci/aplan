@@ -27,7 +27,9 @@ function weixinpay_get_prepay_id($params){
        'Content-Type' => 'application/x-www-form-urlencoded',
     ),
   ));
+
   $data = FromXml($weixinPayResponse->data);
+  watchdog('weixin', http_build_query($data));
   return $data['prepay_id'];
 }
 

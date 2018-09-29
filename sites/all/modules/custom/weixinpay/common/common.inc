@@ -42,3 +42,21 @@ function nozzle_load_id_by_number($number){
   }
 
 }
+
+function get_enable_rule_set(){
+  $usable_rule_sets = array('pay_out_rule_a_collection', 'pay_out_rule_b_collection');
+  $rule_sets = get_all_enable_rule_sets($usable_rule_sets);
+  if(!empty($rule_sets)){
+      return reset($rule_sets);
+  }
+  return FALSE;
+}
+function get_all_enable_rule_sets($usable_rule_sets){
+  $query = new EntityFieldQuery();
+  $stub = $query->entityCondition('entity_type', 'node')
+        ->entityCondition('bundle', $usable_rule_sets, 'IN')
+        ->fieldCondition('field_enable', 'value', 1)
+        ->execute();
+  return entity_load('node', array_keys($stub['node']));
+
+}

@@ -5,16 +5,18 @@ function weixinpay_checkout_pay_callback(){
   $jwt = $_POST['jwt'];
   $nozzleNumber = $_POST['nozzle'];
   $decoded = JWT::decode($jwt, KEY, array('HS256'));
-  $total_fee = $_POST['amount'] * 100;
+  $total_fee_yuan = $_POST['amount'];
+  $total_fee = $total_fee_yuan * 100;
   $openid = $decoded->openid;
   $nonce_str = md5(drupal_random_key(32));
+  $body = "南郊加油站加油${total_fee_yuan}元";
 
   //准备数据调用统一下单接口 获取prepay_id
   $params = array(
     'appid' => APPID,
     'mch_id' => MCH_ID,
     'nonce_str' => $nonce_str,
-    'body' => 'Oilbody',
+    'body' => $body,
     'out_trade_no' => format_date(time(), 'custom', 'YmdHis') . '_' . rand(1000, 9999),
     'total_fee' => $total_fee,
     'spbill_create_ip' => '127.0.0.1',
@@ -42,8 +44,10 @@ function weixinpay_checkout_pay_callback(){
   ));
   extract($new_array);
   $pay_record = new StdClass();
-  $pay_record->is_new = TRUE;
   $pay_record->type = 'pay_record';
+  node_object_prepare($pay_record);
+  $pay_record->is_new = TRUE;
+
   $pay_record->language = 'und';
   $pay_record->uid = 1;
   $pay_record->title = $out_trade_no;
