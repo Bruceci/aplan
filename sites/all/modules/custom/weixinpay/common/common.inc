@@ -33,7 +33,8 @@ function nozzle_load_id_by_number($number){
   $query
   ->entityCondition('entity_type', 'node')
   ->entityCondition('bundle', 'nozzle')
-  ->fieldCondition('field_nozzlenumber', 'value', $number);
+  ->fieldCondition('field_nozzlenumber', 'value', $number)
+  ->propertyCondition('status', 1);
   if($result = $query->execute()){
     $nids = array_keys($result['node']);
     return reset($nids);

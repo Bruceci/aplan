@@ -1,0 +1,12 @@
+name = Taxonomy term access
+description = Control taxonomy term access in a manner mimicking the node access system.
+core = 7.x
+
+dependencies[] = taxonomy
+
+; Information added by Drupal.org packaging script on 2018-02-16
+version = "7.x-1.x-dev"
+core = "7.x"
+project = "taxonomy_term_access"
+datestamp = "1518802688"
+

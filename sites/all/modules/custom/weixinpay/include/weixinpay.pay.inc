@@ -50,12 +50,13 @@ function weixinpay_checkout_pay_callback(){
 
   $pay_record->language = 'und';
   $pay_record->uid = 1;
-  $pay_record->title = $out_trade_no;
+  $pay_record->title = 'Pending';
+  $pay_record->field_outradeno['und'][0]['value'] = $out_trade_no;
   $pay_record->field_appid['und'][0]['value'] = $appid;
   $pay_record->field_mchid['und'][0]['value'] = $mch_id;
   $pay_record->field_totalfee['und'][0]['value'] = $total_fee/100;
   $pay_record->field_payuser['und'][0]['target_id'] = $wxuser_nid;
-  $pay_record->field_recordnozzlenumber['und'][0]['value'] = $nozzle->nid;
+  $pay_record->field_recordnozzlenumber['und'][0]['value'] = $nozzleNumber;
   $pay_record->field_price['und'][0]['value'] = $price;
   node_save($pay_record);
   $pay_reord_id = $pay_record->nid;

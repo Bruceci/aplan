@@ -22,7 +22,7 @@ function weixin_payrecords_callback(){
 
   foreach ($records as $nid => $record) {
     $nozzleNumber = $record->field_recordnozzlenumber['und'][0]['value'];
-    $nozzle = node_load($nozzleNumber);
+    $nozzle = nozzle_load_by_number($nozzleNumber);
     $oilTypeId = $nozzle->field_oiltype['und'][0]['target_id'];
     $oilType = entity_load('taxonomy_term', array($oilTypeId));
     $oilType = reset($oilType);

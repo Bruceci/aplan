@@ -1,0 +1,858 @@
+<?php
+
+/**
+ * @file
+ * Control taxonomy term access in a manner mimicking the node access system.
+ */
+
+/**
+ * Modules should return this value from hook_taxonomy_term_access() to allow
+ * access to a taxonomy_term.
+ */
+define('TAXONOMY_TERM_ACCESS_ALLOW', 'allow');
+
+/**
+ * Modules should return this value from hook_taxonomy_term_access() to deny
+ * access to a taxonomy term.
+ */
+define('TAXONOMY_TERM_ACCESS_DENY', 'deny');
+
+/**
+ * Modules should return this value from hook_taxonomy_term_access() to avoid
+ * affecting taxonomy term access.
+ */
+define('TAXONOMY_TERM_ACCESS_IGNORE', NULL);
+
+/**
+ * Implements hook_help().
+ */
+function taxonomy_term_access_help($path, $arg) {
+  // Remind site administrators about the {taxonomy_term_access} table being
+  // flagged for rebuild. We don't need to issue the message on the confirm
+  // form, or while the rebuild is being processed.
+  if ($path != 'admin/reports/status/rebuild' && $path != 'batch' && strpos($path, '#') === FALSE
+      && user_access('access administration pages') && taxonomy_term_access_needs_rebuild()) {
+    if ($path == 'admin/reports/status') {
+      $message = t('The taxonomy term access permissions need to be rebuilt.');
+    }
+    else {
+      $message = t('The taxonomy term access permissions need to be rebuilt. <a href="@taxonomy_term_access_rebuild">Rebuild permissions</a>.', array('@taxonomy_term_access_rebuild' => url('admin/reports/status/rebuild')));
+    }
+    drupal_set_message($message, 'error');
+  }
+}
+
+/**
+ * Implements hook_permission().
+ */
+function taxonomy_term_access_permission() {
+  $perms = array(
+    'bypass term access' => array(
+      'title' => t('Bypass taxonomy term access control'),
+      'description' => t('View, edit, and delete all taxonomy terms regardless of permission restrictions.'),
+      'restrict access' => TRUE,
+    ),
+  );
+  return $perms;
+}
+
+/**
+ * Implements hook_entity_insert().
+ */
+function taxonomy_term_access_entity_insert($entity, $type) {
+  if ($type == 'taxonomy_term') {
+    // Update the taxonomy term access table for this term.
+    taxonomy_term_access_acquire_grants($entity);
+  }
+}
+
+/**
+ * Implements hook_entity_update().
+ */
+function taxonomy_term_access_entity_update($entity, $type) {
+  if ($type == 'taxonomy_term') {
+    // Update the taxonomy term access table for this term and its descendents.
+    taxonomy_term_access_acquire_grants_tree($entity);
+  }
+}
+
+/**
+ * Generates term access grants for a term and all its descendents.
+ *
+ * @param object $term
+ *   The parent term.
+ * @param bool $delete
+ *   Whether to delete existing taxonomy term access records before inserting
+ *   new ones. Defaults to TRUE.
+ */
+function taxonomy_term_access_acquire_grants_tree($term, $delete = TRUE) {
+  taxonomy_term_access_acquire_grants($term, $delete);
+  foreach (taxonomy_get_tree($term->vid, $term->tid, NULL, TRUE) as $branch) {
+    taxonomy_term_access_acquire_grants($branch, $delete);
+  }
+}
+
+/**
+ * Gets the list of taxonomy term access grants and writes them to the database.
+ *
+ * This function is called when a taxonomy term is saved, and can also be called
+ * by modules if something other than a taxonomy term save causes taxonomy term
+ * access permissions to change. It collects all taxonomy term access grants for
+ * the taxonomy term from hook_taxonomy_term_access_records() implementations,
+ * allows these grants to be altered via
+ * hook_taxonomy_term_access_records_alter() implementations, and saves the
+ * collected and altered grants to the database.
+ *
+ * @param object $term
+ *   The taxonomy term for which to acquire grants.
+ * @param bool $delete
+ *   Whether to delete existing taxonomy term access records before inserting
+ *   new ones. Defaults to TRUE.
+ */
+function taxonomy_term_access_acquire_grants($term, $delete = TRUE) {
+  $grants = module_invoke_all('taxonomy_term_access_records', $term);
+  // Let modules alter the grants.
+  drupal_alter('taxonomy_term_access_records', $grants, $term);
+  // If no grants are set, then use the default grant.
+  if (empty($grants)) {
+    $grants[] = array(
+      'realm' => 'all',
+      'gid' => 0,
+      'grant_view' => 1,
+      'grant_update' => 0,
+      'grant_delete' => 0,
+    );
+  }
+  else {
+    // Retain grants by highest priority.
+    $grant_by_priority = array();
+    foreach ($grants as $g) {
+      $grant_by_priority[intval($g['priority'])][] = $g;
+    }
+    krsort($grant_by_priority);
+    $grants = array_shift($grant_by_priority);
+  }
+
+  taxonomy_term_access_write_grants($term, $grants, NULL, $delete);
+}
+
+/**
+ * Writes a list of grants to the database, deleting any previously saved ones.
+ *
+ * If a realm is provided, it will delete grants only from that realm, but it
+ * will always delete a grant from the 'all' realm. Modules that utilize
+ * taxonomy_term_access() can use this function when doing mass updates due to
+ * widespread permission changes.
+ *
+ * Note: Don't call this function directly from a contributed module. Call
+ * taxonomy_term_access_acquire_grants() instead.
+ *
+ * @param object $term
+ *   The term whose grants are being written.
+ * @param array $grants
+ *   A list of grants to write. Each grant is an array that must contain the
+ *   following keys: realm, gid, grant_view, grant_update, grant_delete.
+ *   The realm is specified by a particular module; the gid is as well, and
+ *   is a module-defined id to define grant privileges. each grant_* field
+ *   is a boolean value.
+ * @param array $realm
+ *   (optional) If provided, read/write grants for that realm only. Defaults to
+ *   NULL.
+ * @param bool $delete
+ *   (optional) If false, does not delete records. This is only for optimization
+ *   purposes, and assumes the caller has already performed a mass delete of
+ *   some form. Defaults to TRUE.
+ *
+ * @see taxonomy_term_access_acquire_grants()
+ */
+function taxonomy_term_access_write_grants($term, $grants, $realm = NULL, $delete = TRUE) {
+  if ($delete) {
+    $query = db_delete('taxonomy_term_access')->condition('tid', $term->tid);
+    if ($realm) {
+      $query->condition('realm', array($realm, 'all'), 'IN');
+    }
+    $query->execute();
+  }
+
+  // Only perform work when taxonomy_term_access modules are active.
+  if (!empty($grants) && count(module_implements('taxonomy_term_grants'))) {
+    try {
+      $query = db_insert('taxonomy_term_access')->fields(array(
+        'tid',
+        'realm',
+        'gid',
+        'grant_view',
+        'grant_update',
+        'grant_delete',
+      ));
+      foreach ($grants as $grant) {
+        if ($realm && $realm != $grant['realm']) {
+          continue;
+        }
+        // Only write grants; denies are implicit.
+        if ($grant['grant_view'] || $grant['grant_update'] || $grant['grant_delete']) {
+          $grant['tid'] = $term->tid;
+          $query->values($grant);
+        }
+      }
+      $query->execute();
+    }
+    catch (PDOException $e) {
+      watchdog('taxonomy_term_access', 'Insertion query for :tid in {taxonomy_term_access} failed with: :message', array(
+        ":tid" => $term->tid,
+        ":message" => $e->getMessage(),
+      ), WATCHDOG_ERROR, l($term->tid, 'taxonomy/term/' . $term->tid . '/edit'));
+    }
+  }
+}
+
+/**
+ * Flags or unflags the taxonomy term access grants for rebuilding.
+ *
+ * If the argument isn't specified, the current value of the flag is returned.
+ * When the flag is set, a message is displayed to users with 'access
+ * administration pages' permission, pointing to the 'rebuild' confirm form.
+ * This can be used as an alternative to direct taxonomy_term_access_rebuild
+ * calls, allowing administrators to decide when they want to perform the actual
+ * (possibly time consuming) rebuild. When unsure if the current user is an
+ * administrator, taxonomy_term_access_rebuild() should be used instead.
+ *
+ * @param bool $rebuild
+ *   (Optional) The boolean value to be written.
+ *
+ * @return bool
+ *   The current value of the flag if no value was provided for $rebuild.
+ *
+ * @see taxonomy_term_access_rebuild()
+ */
+function taxonomy_term_access_needs_rebuild($rebuild = NULL) {
+  if (!isset($rebuild)) {
+    return variable_get('taxonomy_term_access_needs_rebuild', FALSE);
+  }
+  elseif ($rebuild) {
+    variable_set('taxonomy_term_access_needs_rebuild', TRUE);
+  }
+  else {
+    variable_del('taxonomy_term_access_needs_rebuild');
+  }
+}
+
+/**
+ * Rebuilds the taxonomy term access database.
+ *
+ * This is occasionally needed by modules that make system-wide changes to
+ * access levels. When the rebuild is required by an admin-triggered action (e.g
+ * module settings form), calling taxonomy_term_access_needs_rebuild(TRUE)
+ * instead of taxonomy_term_access_rebuild() lets the user perform his changes
+ * and actually rebuild only once he is done.
+ *
+ * @param bool $batch_mode
+ *   Set to TRUE to process in 'batch' mode, spawning processing over several
+ *   HTTP requests (thus avoiding the risk of PHP timeout if the site has a
+ *   large number of taxonomy terms).
+ *   hook_update_N and any form submit handler are safe contexts to use the
+ *   'batch mode'. Less decidable cases (such as calls from hook_user,
+ *   hook_taxonomy, etc...) might consider using the non-batch mode.
+ *
+ * @see taxonomy_term_access_needs_rebuild()
+ */
+function taxonomy_term_access_rebuild($batch_mode = FALSE) {
+  db_delete('taxonomy_term_access')->execute();
+  // Only recalculate if the site is using a taxonomy_term_access module.
+  if (count(module_implements('taxonomy_term_grants'))) {
+    if ($batch_mode) {
+      $batch = array(
+        'title' => t('Rebuilding taxonomy term access permissions'),
+        'operations' => array(
+          array('_taxonomy_term_access_rebuild_batch_operation', array()),
+        ),
+        'finished' => '_taxonomy_term_access_rebuild_batch_finished',
+      );
+      batch_set($batch);
+    }
+    else {
+      // Try to allocate enough time to rebuild taxonomy term grants.
+      drupal_set_time_limit(240);
+
+      // Rebuild newest taxonomy terms first so that recent content becomes
+      // available quickly.
+      $tids = db_query("SELECT tid FROM {taxonomy_term_data} ORDER BY tid DESC")->fetchCol();
+      foreach ($tids as $tid) {
+        $term = taxonomy_term_load($tid, NULL, TRUE);
+        // To preserve database integrity, only acquire grants if the taxonomy
+        // term loads successfully.
+        if (!empty($term)) {
+          taxonomy_term_access_acquire_grants($term);
+        }
+      }
+    }
+  }
+  else {
+    // Not using any taxonomy_term_access modules. Add the default grant.
+    db_insert('taxonomy_term_access')
+      ->fields(array(
+        'tid' => 0,
+        'realm' => 'all',
+        'gid' => 0,
+        'grant_view' => 1,
+        'grant_update' => 0,
+        'grant_delete' => 0,
+      ))
+      ->execute();
+  }
+
+  if (!isset($batch)) {
+    drupal_set_message(t('Taxonomy term permissions have been rebuilt.'));
+    taxonomy_term_access_needs_rebuild(FALSE);
+    cache_clear_all();
+  }
+}
+
+/**
+ * Implements callback_batch_operation().
+ *
+ * Performs batch operation for taxonomy_term_access_rebuild().
+ *
+ * This is a multistep operation: we go through all taxonomy terms by packs of
+ * 20. The batch processing engine interrupts processing and sends progress
+ * feedback after 1 second execution time.
+ *
+ * @param array $context
+ *   An array of contextual key/value information for rebuild batch process.
+ */
+function _taxonomy_term_access_rebuild_batch_operation(array &$context) {
+  if (empty($context['sandbox'])) {
+    // Initiate multistep processing.
+    $context['sandbox']['progress'] = 0;
+    $context['sandbox']['current_taxonomy_term'] = 0;
+    $context['sandbox']['max'] = db_query('SELECT COUNT(tid) FROM {taxonomy_term_data}')->fetchField();
+  }
+
+  // Process the next 20 taxonomy terms.
+  $limit = 20;
+  $tids = db_query_range("
+    SELECT tid FROM {taxonomy_term_data} WHERE tid > :tid ORDER BY tid ASC
+  ", 0, $limit, array(':tid' => $context['sandbox']['current_taxonomy_term'])
+  )->fetchCol();
+  $terms = taxonomy_term_load_multiple($tids, array(), TRUE);
+  foreach ($terms as $tid => $term) {
+    // To preserve database integrity, only acquire grants if the taxonomy term
+    // loads successfully.
+    if (!empty($term)) {
+      taxonomy_term_access_acquire_grants($term);
+    }
+    $context['sandbox']['progress']++;
+    $context['sandbox']['current_taxonomy_term'] = $tid;
+  }
+
+  // Multistep processing: report progress.
+  if ($context['sandbox']['progress'] != $context['sandbox']['max']) {
+    $context['finished'] = $context['sandbox']['progress'] / $context['sandbox']['max'];
+  }
+}
+
+/**
+ * Implements callback_batch_finished().
+ *
+ * Performs post-processing for taxonomy_term_access_rebuild().
+ *
+ * @param bool $success
+ *   A boolean indicating whether the re-build process has completed.
+ * @param array $results
+ *   An array of results information.
+ * @param array $operations
+ *   An array of function calls (not used in this function).
+ */
+function _taxonomy_term_access_rebuild_batch_finished($success, $results, $operations) {
+  if ($success) {
+    drupal_set_message(t('The taxonomy term access permissions have been rebuilt.'));
+    taxonomy_term_access_needs_rebuild(FALSE);
+  }
+  else {
+    drupal_set_message(t('The taxonomy term access permissions have not been properly rebuilt.'), 'error');
+  }
+  cache_clear_all();
+}
+
+/**
+ * Implements hook_module_implements_alter().
+ *
+ * Run our entity hook implementations last to mimic node access better.
+ */
+function taxonomy_term_access_module_implements_alter(&$implmentations, $hook) {
+  switch ($hook) {
+    case 'entity_insert':
+    case 'entity_update':
+      if (isset($implementations['taxonomy_term_access'])) {
+        $group = $implementations['taxonomy_term_access'];
+        unset($implmentations['taxonomy_term_access']);
+        $implmentations['taxonomy_term_access'] = $group;
+      }
+      break;
+  }
+}
+
+/**
+ * Determines whether the current user may perform the operation on the term.
+ *
+ * @param string $op
+ *   The operation to be performed on the taxonomy term. Possible values are:
+ *   - "view"
+ *   - "update"
+ *   - "delete"
+ *   - "create"
+ * @param object $term
+ *   The term object on which the operation is to be performed, or vocabulary
+ *   name for "create" operation.
+ * @param object $account
+ *   Optional, a user object representing the user for whom the operation is to
+ *   be performed. Determines access for a user other than the current user.
+ *
+ * @return bool
+ *   TRUE if the operation may be performed, FALSE otherwise.
+ */
+function taxonomy_term_access($op, $term, $account = NULL) {
+  $rights = &drupal_static(__FUNCTION__, array());
+
+  if (!$term || !in_array($op, array('view', 'update', 'delete', 'create'), TRUE)) {
+    // If there was no term to check against, or the $op was not one of the
+    // supported ones, we return access denied.
+    return FALSE;
+  }
+  // If no user object is supplied, the access check is for the current user.
+  if (empty($account)) {
+    $account = $GLOBALS['user'];
+  }
+
+  // $term may be either an object or a vocabulary name. Since vocabulary names
+  // cannot be an integer, use either tid or vocabulary name as the static cache
+  // id.
+  $cid = is_object($term) ? $term->tid : $term;
+
+  // If we've already checked access for this term, user and op, return from
+  // cache.
+  if (isset($rights[$account->uid][$cid][$op])) {
+    return $rights[$account->uid][$cid][$op];
+  }
+
+  if (user_access('bypass term access', $account)) {
+    $rights[$account->uid][$cid][$op] = TRUE;
+    return TRUE;
+  }
+
+  // We grant access to the term if both of the following conditions are met:
+  // - No modules say to deny access.
+  // - At least one module says to grant access.
+  // If no module specified either allow or deny, we fall back to the
+  // taxonomy_term_access table.
+  $access = module_invoke_all('taxonomy_term_access', $term, $op, $account);
+  if (in_array(TAXONOMY_TERM_ACCESS_DENY, $access, TRUE)) {
+    $rights[$account->uid][$cid][$op] = FALSE;
+    return FALSE;
+  }
+  elseif (in_array(TAXONOMY_TERM_ACCESS_ALLOW, $access, TRUE)) {
+    $rights[$account->uid][$cid][$op] = TRUE;
+    return TRUE;
+  }
+
+  // If the module did not override the access rights, use those set in the
+  // taxonomy_term_access table.
+  if ($op != 'create' && $term->tid) {
+    if (module_implements('taxonomy_term_grants')) {
+      $query = db_select('taxonomy_term_access');
+      $query->addExpression('1');
+      $query->condition('grant_' . $op, 1, '>=');
+      $tids = db_or()->condition('tid', $term->tid);
+      $query->condition($tids);
+      $query->range(0, 1);
+
+      $grants = db_or();
+      foreach (taxonomy_term_access_grants($op, $account) as $realm => $gids) {
+        foreach ($gids as $gid) {
+          $grants->condition(db_and()
+            ->condition('gid', $gid)
+            ->condition('realm', $realm)
+          );
+        }
+      }
+      if (count($grants) > 0) {
+        $query->condition($grants);
+      }
+      $result = (bool) $query
+        ->execute()
+        ->fetchField();
+      $rights[$account->uid][$cid][$op] = $result;
+      return $result;
+    }
+    elseif (is_object($term) && $op == 'view') {
+      // If no modules implement hook_taxonomy_term_grants(), the default
+      // behavior is to allow all users to view taxonomy terms, so reflect that
+      // here.
+      $rights[$account->uid][$cid][$op] = TRUE;
+      return TRUE;
+    }
+  }
+
+  return FALSE;
+}
+
+/**
+ * Implements hook_taxonomy_term_access().
+ */
+function taxonomy_term_access_taxonomy_term_access($term, $op, $account) {
+  if (is_string($term)) {
+    $vocabulary = taxonomy_vocabulary_machine_name_load($term);
+  }
+  else {
+    $vocabulary = taxonomy_vocabulary_load($term->vid);
+  }
+
+  if ($vocabulary) {
+    if ($op == 'create' && user_access('edit terms in ' . $vocabulary->vid, $account)) {
+      return TAXONOMY_TERM_ACCESS_ALLOW;
+    }
+
+    if ($op == 'update') {
+      if (user_access('edit terms in ' . $term->vid, $account)) {
+        return TAXONOMY_TERM_ACCESS_ALLOW;
+      }
+    }
+
+    if ($op == 'delete') {
+      if (user_access('delete terms in ' . $term->vid, $account)) {
+        return TAXONOMY_TERM_ACCESS_ALLOW;
+      }
+    }
+  }
+
+  return TAXONOMY_TERM_ACCESS_IGNORE;
+}
+
+/**
+ * Fetches an array of permission IDs granted to the given user ID.
+ *
+ * The implementation here provides only the universal "all" grant. A taxonomy
+ * term access module should implement hook_taxonomy_term_access_grants() to
+ * provide a grant list for the user.
+ *
+ * After the default grants have been loaded, we allow modules to alter the
+ * grants array by reference. This hook allows for complex business logic to be
+ * applied when integrating multiple taxonomy term access modules.
+ *
+ * @param $op
+ *   The operation that the user is trying to perform.
+ * @param $account
+ *   The user object for the user performing the operation. If omitted, the
+ *   current user is used.
+ *
+ * @return array
+ *   An associative array in which the keys are realms, and the values are
+ *   arrays of grants for those realms.
+ */
+function taxonomy_term_access_grants($op, $account = NULL) {
+
+  if (!isset($account)) {
+    $account = $GLOBALS['user'];
+  }
+
+  // Fetch taxonomy term access grants from other modules.
+  $grants = module_invoke_all('taxonomy_term_grants', $account, $op);
+  // Allow modules to alter the assigned grants.
+  drupal_alter('taxonomy_term_grants', $grants, $account, $op);
+
+  return array_merge(array('all' => array(0)), $grants);
+}
+
+/**
+ * Determines if the user has a global viewing grant for all taxonomy terms.
+ *
+ * Checks to see whether any module grants global 'view' access to a user
+ * account; global 'view' access is encoded in the {taxonomy_term_access} table
+ * as a grant with tid=0. If no taxonomy term access modules are enabled,
+ * taxonomy_term_access.module defines such a global 'view' access grant.
+ *
+ * This function is called when a taxonomy term listing query is tagged with
+ * 'taxonomy_term_access'; when this function returns TRUE, no taxonomy term
+ * access joins are added to the query.
+ *
+ * @param $account
+ *   The user object for the user whose access is being checked. If omitted,
+ *   the current user is used.
+ *
+ * @return bool
+ *   TRUE if 'view' access to all taxonomy terms is granted, FALSE otherwise.
+ *
+ * @see hook_taxonomy_term_grants()
+ * @see _taxonomy_term_access_query_taxonomy_term_access_alter()
+ */
+function taxonomy_term_access_view_all_taxonomy_terms($account = NULL) {
+  global $user;
+  if (!$account) {
+    $account = $user;
+  }
+
+  // Statically cache results in an array keyed by $account->uid.
+  $access = &drupal_static(__FUNCTION__);
+  if (isset($access[$account->uid])) {
+    return $access[$account->uid];
+  }
+
+  // If no modules implement the taxonomy term access system, access is always
+  // TRUE.
+  if (!module_implements('taxonomy_term_grants')) {
+    $access[$account->uid] = TRUE;
+  }
+  else {
+    $query = db_select('taxonomy_term_access');
+    $query->addExpression('COUNT(*)');
+    $query
+      ->condition('tid', 0)
+      ->condition('grant_view', 1, '>=');
+
+    $grants = db_or();
+    foreach (taxonomy_term_access_grants('view', $account) as $realm => $gids) {
+      foreach ($gids as $gid) {
+        $grants->condition(db_and()
+          ->condition('gid', $gid)
+          ->condition('realm', $realm)
+        );
+      }
+    }
+    if (count($grants) > 0) {
+      $query->condition($grants);
+    }
+    $access[$account->uid] = $query
+      ->execute()
+      ->fetchField();
+  }
+
+  return $access[$account->uid];
+}
+
+/**
+ * Implements hook_query_TAG_alter().
+ *
+ * This is the hook_query_alter() for queries tagged with
+ * 'taxonomy_term_access'. It adds taxonomy term access checks for the user
+ * account given by the 'account' meta-data (or global $user if not provided),
+ * for an operation given by the 'op' meta-data (or 'view' if not provided;
+ * other possible values are 'update' and 'delete').
+ */
+function taxonomy_term_access_query_taxonomy_term_access_alter(QueryAlterableInterface $query) {
+  _taxonomy_term_access_query_taxonomy_term_access_alter($query, 'taxonomy_term');
+}
+
+/**
+ * Implements hook_query_TAG_alter().
+ *
+ * This function implements the same functionality as
+ * taxonomy_term_access_query_taxonomy_term_access_alter() for the SQL field
+ * storage engine. Taxonomy term access conditions are added for field values
+ * belonging to taxonomy terms only.
+ */
+function taxonomy_term_access_query_entity_field_access_alter(QueryAlterableInterface $query) {
+  _taxonomy_term_access_query_taxonomy_term_access_alter($query, 'entity');
+}
+
+/**
+ * Helper for taxonomy term access functions.
+ *
+ * Queries tagged with 'taxonomy_term_access' that are not against the
+ * {taxonomy_term_data} table should add the base table as metadata. For
+ * example:
+ * @code
+ *   $query
+ *     ->addTag('taxonomy_term_access')
+ *     ->addMetaData('base_table', 'taxonomy_index');
+ * @endcode
+ * If the query is not against the {taxonomy_term_data} table, an attempt is
+ * made to guess the table, but is not recommended to rely on this as it is
+ * deprecated. It is always safer to provide the table.
+ *
+ * @param $query
+ *   The query to add conditions to.
+ * @param $type
+ *   Either 'taxonomy_term' or 'entity' depending on what sort of query it is.
+ *   See taxonomy_term_access_query_taxonomy_term_access_alter() and
+ *   taxonomy_term_access_query_entity_field_access_alter() for more.
+ */
+function _taxonomy_term_access_query_taxonomy_term_access_alter($query, $type) {
+  global $user;
+
+  // Read meta-data from query, if provided.
+  if (!$account = $query->getMetaData('account')) {
+    $account = $user;
+  }
+  if (!$op = $query->getMetaData('op')) {
+    $op = 'view';
+  }
+
+  // If $account can bypass taxonomy term access, or there are no taxonomy term
+  // access modules, or the operation is 'view' and the $account has a global
+  // view grant (such as a view grant for taxonomy term ID 0), we don't need to
+  // alter the query.
+  if (user_access('bypass term access', $account)) {
+    return;
+  }
+  if (!count(module_implements('taxonomy_term_grants'))) {
+    return;
+  }
+  if ($op == 'view' && taxonomy_term_access_view_all_taxonomy_terms($account)) {
+    return;
+  }
+
+  $tables = $query->getTables();
+  $base_table = $query->getMetaData('base_table');
+  // If no base table is specified explicitly, search for one.
+  if (!$base_table) {
+    $fallback = '';
+    foreach ($tables as $alias => $table_info) {
+      if (!($table_info instanceof SelectQueryInterface)) {
+        $table = $table_info['table'];
+        // If the taxonomy term table is in the query, it wins immediately.
+        if ($table == 'taxonomy_term_data') {
+          $base_table = $table;
+          break;
+        }
+        // Check whether the table has a foreign key to taxonomy_term_data.tid.
+        // If it does, do not run this check again as we found a base table and
+        // only taxonomy_term_data can trump that.
+        if (!$base_table) {
+          // The schema is cached.
+          $schema = drupal_get_schema($table);
+          if (isset($schema['fields']['tid'])) {
+            if (isset($schema['foreign keys'])) {
+              foreach ($schema['foreign keys'] as $relation) {
+                if ($relation['table'] === 'taxonomy_term_data' && $relation['columns'] === array('tid' => 'tid')) {
+                  $base_table = $table;
+                }
+              }
+            }
+            else {
+              // At least it's a tid. A table with a field called tid is very
+              // likely to be a taxonomy_term_data.tid in a taxonomy term access
+              // query.
+              $fallback = $table;
+            }
+          }
+        }
+      }
+    }
+    // If there is nothing else, use the fallback.
+    if (!$base_table) {
+      if ($fallback) {
+        watchdog('security', 'Your taxonomy term listing query is using @fallback as a base table in a query tagged for taxonomy term access. This might not be secure and might not even work. Specify foreign keys in your schema to taxonomy_term_data.tid ', array('@fallback' => $fallback), WATCHDOG_WARNING);
+        $base_table = $fallback;
+      }
+      else {
+        throw new Exception(t('Query tagged for taxonomy term access but there is no tid. Add foreign keys to taxonomy_term_data.tid in schema to fix.'));
+      }
+    }
+  }
+
+  // Find all instances of the base table being joined -- could appear
+  // more than once in the query, and could be aliased. Join each one to
+  // the taxonomy_term_access table.
+
+  $grants = taxonomy_term_access_grants($op, $account);
+  if ($type == 'entity') {
+    // The original query looked something like:
+    // @code
+    //  SELECT tid FROM sometable s
+    //  INNER JOIN taxonomy_term_access tta ON tta.tid = s.tid
+    //  WHERE ($taxonomy_term_access_conditions)
+    // @endcode
+    //
+    // Our query will look like:
+    // @code
+    //  SELECT entity_type, entity_id
+    //  FROM field_data_something s
+    //  LEFT JOIN taxonomy_term_access tta ON s.entity_id = tta.tid
+    //  WHERE (entity_type = 'taxonomy_term_data'
+    //      AND $taxonomy_term_access_conditions
+    //    )
+    //    OR (entity_type <> 'taxonomy_term_data')
+    // @endcode
+    //
+    // So instead of directly adding to the query object, we need to collect
+    // all of the taxonomy term access conditions in a separate db_and() object
+    // and then add it to the query at the end.
+    $taxonomy_term_conditions = db_and();
+  }
+  foreach ($tables as $ttalias => $tableinfo) {
+    $table = $tableinfo['table'];
+    if (!($table instanceof SelectQueryInterface) && $table == $base_table) {
+      // Set the subquery.
+      $subquery = db_select('taxonomy_term_access', 'tta')
+        ->fields('tta', array('tid'));
+
+      $grant_conditions = db_or();
+      // If any grant exists for the specified user, then user has access
+      // to the taxonomy term for the specified operation.
+      foreach ($grants as $realm => $gids) {
+        foreach ($gids as $gid) {
+          $grant_conditions->condition(db_and()
+            ->condition('tta.gid', $gid)
+            ->condition('tta.realm', $realm)
+          );
+        }
+      }
+
+      // Attach conditions to the subquery for taxonomy terms.
+      if (count($grant_conditions->conditions())) {
+        $subquery->condition($grant_conditions);
+      }
+      $subquery->condition('tta.grant_' . $op, 1, '>=');
+      $field = 'tid';
+      // Now handle entities.
+      if ($type == 'entity') {
+        // Set a common alias for entities.
+        $base_alias = $ttalias;
+        $field = 'entity_id';
+      }
+      $subquery->where("$ttalias.$field = tta.tid");
+
+      // For an entity query, attach the subquery to entity conditions.
+      if ($type == 'entity') {
+        $taxonomy_term_conditions->exists($subquery);
+      }
+      // Otherwise attach it to the taxonomy term query itself.
+      else {
+        $query->exists($subquery);
+      }
+    }
+  }
+
+  if ($type == 'entity' && count($subquery->conditions())) {
+    // All the taxonomy term access conditions are only for field values
+    // belonging to taxonomy terms.
+    $taxonomy_term_conditions->condition("$base_alias.entity_type", 'taxonomy_term');
+    $or = db_or();
+    $or->condition($taxonomy_term_conditions);
+    // If the field value belongs to a non-term entity type then this function
+    // does not do anything with it.
+    $or->condition("$base_alias.entity_type", 'taxonomy_term', '<>');
+    // Add the compiled set of rules to the query.
+    $query->condition($or);
+  }
+
+}
+
+/**
+ * Implements hook_form_FORM_ID_alter() for node_configure_rebuild_confirm.
+ */
+function taxonomy_term_access_form_node_configure_rebuild_confirm_alter(&$form, &$form_state) {
+  $form['actions']['taxonomy_term_access_rebuild'] = array(
+    '#type' => 'submit',
+    '#value' => t('Rebuild term permissions'),
+    '#weight' => 0,
+    '#submit' => array('taxonomy_term_access_configure_rebuild_confirm_submit'),
+  );
+}
+
+/**
+ * Submit handler for node_configure_rebuild_confirm.
+ */
+function taxonomy_term_access_configure_rebuild_confirm_submit($form, &$form_state) {
+  taxonomy_term_access_rebuild(TRUE);
+}

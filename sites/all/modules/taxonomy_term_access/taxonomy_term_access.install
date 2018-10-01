@@ -1,0 +1,121 @@
+<?php
+
+/**
+ * @file
+ * Install, update, and uninstall functions for the taxonomy term access module.
+ */
+
+/**
+ * Implements hook_schema().
+ */
+function taxonomy_term_access_schema() {
+  $schema['taxonomy_term_access'] = array(
+    'description' => 'Identifies which realm/grant pairs a user must posses in order to view, update, or delete specific taxonomy terms.',
+    'fields' => array(
+      'tid' => array(
+        'description' => 'The {taxnomy_term}.tid this record affects.',
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'gid' => array(
+        'description' => "The grant ID a user must possess in the specified realm to gain this row's privileges on the taxonomy term.",
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'realm' => array(
+        'description' => 'The realm in which the user must possess the grant ID.',
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'grant_view' => array(
+        'description' => 'Boolean indicating whether a user with the realm/grant pair can view this taxonomy term.',
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+        'size' => 'tiny',
+      ),
+      'grant_update' => array(
+        'description' => 'Boolean indicating whether a user with the realm/grant pair can edit this taxonomy term.',
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+        'size' => 'tiny',
+      ),
+      'grant_delete' => array(
+        'description' => 'Boolean indicating whether a user with the realm/grant pair can delete this taxonomy term.',
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+        'size' => 'tiny',
+      ),
+    ),
+    'primary key' => array('tid', 'gid', 'realm'),
+    'foreign keys' => array(
+      'affected_taxonomy_term_data' => array(
+        'table' => 'taxonomy_term_data',
+        'columns' => array('tid' => 'tid'),
+      ),
+    ),
+  );
+  return $schema;
+}
+
+/**
+ * Implements hook_install().
+ */
+function taxonomy_term_access_install() {
+  // Populate the taxonomy term access table.
+  db_insert('taxonomy_term_access')
+    ->fields(array(
+      'tid' => 0,
+      'gid' => 0,
+      'realm' => 'all',
+      'grant_view' => 1,
+      'grant_update' => 0,
+      'grant_delete' => 0,
+    ))
+    ->execute();
+}
+
+/**
+ * Implements hook_uninstall().
+ */
+function taxonomy_term_access_uninstall() {
+  variable_del('taxonomy_term_access_needs_rebuild');
+}
+
+/**
+ * Implements hook_requirements().
+ */
+function taxonomy_term_access_requirements($phase) {
+  $requirements = array();
+  if ($phase === 'runtime') {
+    // Show the rebuild button only if there are either 0, or 2 or more, rows in
+    // the {taxonomy_term_access} table, or if there are modules that implement
+    // hook_taxonomy_term_grants().
+    $grant_count = db_query('SELECT COUNT(*) FROM {taxonomy_term_access}')->fetchField();
+    if ($grant_count != 1 || count(module_implements('taxonomy_term_grants')) > 0) {
+      $value = format_plural($grant_count, 'One permission in use', '@count permissions in use', array('@count' => $grant_count));
+    }
+    else {
+      $value = t('Disabled');
+    }
+    $description = t('If the site is experiencing problems with permissions to taxonomy terms, you may have to rebuild the permissions cache. Rebuilding will remove all privileges to taxonomy terms and replace them with permissions based on the current modules and settings. Rebuilding may take some time if there are many terms or complex permission settings. After rebuilding has completed, taxonomy terms will automatically use the new permissions.');
+
+    $requirements['taxonomy_term_access'] = array(
+      'title' => t('Taxonomy Term Access Permissions'),
+      'value' => $value,
+      'description' => $description . ' ' . l(t('Rebuild permissions'), 'admin/reports/status/rebuild'),
+    );
+  }
+  return $requirements;
+}

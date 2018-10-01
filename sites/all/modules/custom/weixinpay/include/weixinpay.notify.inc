@@ -39,7 +39,8 @@ function weixinpay_wait_notify_callback(){
        echo ToXml($successReturn);
        return;
      }
-     if($pay_record->title === $data['out_trade_no']){
+     if($pay_record->field_outradeno['und'][0]['value'] === $data['out_trade_no']){
+       $pay_record->title = $data['out_trade_no'];
        $pay_record->field_banktype['und'][0]['value'] = $data['bank_type'];
        $pay_record->field_feetype['und'][0]['value'] = $data['fee_type'];
        $pay_record->field_cashfee['und'][0]['value'] = $data['cash_fee']/100;
@@ -48,7 +49,7 @@ function weixinpay_wait_notify_callback(){
        $pay_record->field_transactionid['und'][0]['value'] = $data['transaction_id'];
        $pay_record->field_resultcode['und'][0]['value'] = $result_code;
        $pay_record->field_returncode['und'][0]['value'] = $return_code;
-       $pay_record->field_timend['und'][0]['value'] = format_date(strtotime($data['time_end']), 'custom', 'Y-m-d H:i:s', 'Asia/Shanghai');
+       $pay_record->field_timend['und'][0]['value'] = format_date(strtotime($data['time_end']), 'custom', 'Y-m-d H:i:s', 'UTC');
        $pay_record->field_tradetype['und'][0]['value'] = $data['trade_type'];
        node_save($pay_record);
        echo ToXml($successReturn);
