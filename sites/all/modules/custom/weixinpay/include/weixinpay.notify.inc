@@ -51,6 +51,7 @@ function weixinpay_wait_notify_callback(){
        $pay_record->field_returncode['und'][0]['value'] = $return_code;
        $pay_record->field_timend['und'][0]['value'] = format_date(strtotime($data['time_end']), 'custom', 'Y-m-d H:i:s', 'UTC');
        $pay_record->field_tradetype['und'][0]['value'] = $data['trade_type'];
+       $pay_record->status = 1;
        node_save($pay_record);
        echo ToXml($successReturn);
        weixin_pay_out($openid, $data['total_fee'], $pay_record->nid);

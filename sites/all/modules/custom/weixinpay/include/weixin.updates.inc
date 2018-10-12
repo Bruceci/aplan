@@ -1,6 +1,6 @@
 <?php
 function weixin_update_nozzle_callback(){
-
+    $jwt = $_SERVER['HTTP_JWT'];
     $query = new EntityFieldQuery();
     $query
       ->entityCondition('entity_type', 'node')

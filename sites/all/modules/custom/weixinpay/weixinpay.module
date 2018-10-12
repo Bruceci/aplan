@@ -5,7 +5,7 @@ const MCH_ID = '1511838561';
 const MCH_KEY = '34r4eju78io986543ju8765r87uvbnx6';
 const UNIFIED_API =  'https://api.mch.weixin.qq.com/pay/unifiedorder';
 const SESSION_API = 'https://api.weixin.qq.com/sns/jscode2session';
-const KEY = '12345678';
+const KEY = '1234567890';
 variable_set('notify_url', 'https://0376866.com/wait_notify');
 include 'utility/utility.inc';
 include 'common/common.inc';
@@ -29,18 +29,17 @@ function weixinpay_menu(){
     'file path' => drupal_get_path('module', 'weixinpay') . '/include'
 
   );
-  $items['wxlogin'] = array(
-    'title' => 'Wei xin Login',
-    'page callback' => 'weixin_login_callback',
+  $items['userinit'] = array(
+    'title' => 'Wei User Init',
+    'page callback' => 'weixin_user_init_callback',
     'access callback' => TRUE,
     'type' => MENU_CALLBACK,
     'file' => 'weixin.login.inc',
     'file path' => drupal_get_path('module', 'weixinpay') . '/include'
-
   );
-  $items['wxuserupdate'] = array(
+  $items['setuserinfo'] = array(
     'title' => 'Wei xin user update',
-    'page callback' => 'weixin_user_update_callback',
+    'page callback' => 'weixin_set_user_info',
     'access callback' => TRUE,
     'type' => MENU_CALLBACK,
     'file' => 'weixin.login.inc',
@@ -87,52 +86,95 @@ function weixinpay_menu(){
     'file' => 'weixin.info.inc',
     'file path' => drupal_get_path('module', 'weixinpay') . '/include'
   );
+  $items['createinvoice'] = array(
+    'title' => 'Create Invoice',
+    'page callback' => 'weixin_create_invoice',
+    'access callback' => TRUE,
+    'type' => MENU_CALLBACK,
+    'file' => 'weixin.settings.inc',
+    'file path' => drupal_get_path('module', 'weixinpay') . '/include'
+  );
+  $items['deleteinvoice'] = array(
+    'title' => 'Create Invoice',
+    'page callback' => 'weixin_delete_invoice',
+    'access callback' => TRUE,
+    'type' => MENU_CALLBACK,
+    'file' => 'weixin.settings.inc',
+    'file path' => drupal_get_path('module', 'weixinpay') . '/include'
+  );
+  $items['initinvoicelist'] = array(
+    'title' => 'Init Invoice List',
+    'page callback' => 'weixin_initinvoicelist_callback',
+    'page arguments' => array(1),
+    'access callback' => TRUE,
+    'type' => MENU_CALLBACK,
+    'file' => 'weixin.settings.inc',
+    'file path' => drupal_get_path('module', 'weixinpay') . '/include'
+  );
+  $items['confirminvoice'] = array(
+    'title' => 'Confirm Invoice',
+    'page callback' => 'weixin_confirm_invoice_callback',
+    'access callback' => TRUE,
+    'type' => MENU_CALLBACK,
+    'file' => 'weixin.settings.inc',
+    'file path' => drupal_get_path('module', 'weixinpay') . '/include'
+  );
   $items['test'] = array(
     'title' => 'Testing',
     'page callback' => 'test_callback',
     'access callback' => TRUE,
-    'type' => MENU_CALLBACK
+
   );
   return $items;
 }
 
 function test_callback(){
-
- return 'hell';
-
+  $node = node_load(379);
+  dpm($node);
+  return 'hello';
 }
 function weixinpay_node_update($node){
-  watchdog('node update', $node->title);
   weixinpay_node_detect($node);
-  $usable_rule_sets = array('pay_out_rule_a_collection', 'pay_out_rule_b_collection');
-  $node_wrapper = entity_metadata_wrapper('node', $node);
-  if(in_array($node->type, $usable_rule_sets) && $node_wrapper->field_enable->value() == 1){
-    $enable_rule_sets = get_all_enable_rule_sets($usable_rule_sets);
-    foreach ($enable_rule_sets as $nid => $e_node) {
-      if($nid != $node->nid){
-        $e_node_wrapper = entity_metadata_wrapper('node', $e_node);
-        $e_node_wrapper->field_enable->set(0);
-        $e_node_wrapper->save();
-
+  weixin_rules_update($node);
+  weixinpay_wxuser_mark($node);
+}
+function weixin_rules_update($node){
+  $usable_rule_set_types = array('pay_out_rule_a_collection', 'pay_out_rule_b_collection');
+  if(in_array($node->type, $usable_rule_set_types) ){
+    $node_wrapper = entity_metadata_wrapper('node', $node);
+    if($node_wrapper->field_enable->value() == 1){
+      $enable_rule_sets = get_all_enable_rule_sets($usable_rule_set_types);
+      foreach ($enable_rule_sets as $nid => $e_node) {
+        if($nid != $node->nid){
+          $e_node_wrapper = entity_metadata_wrapper('node', $e_node);
+          $e_node_wrapper->field_enable->set(0);
+          $e_node_wrapper->save();
+        }
       }
     }
   }
 }
 function weixinpay_node_delete($node){
-  watchdog('node delete', $node->title);
   weixinpay_node_detect($node);
+  weixinpay_wxuser_mark($node);
 }
 function weixinpay_node_insert($node){
-  watchdog('node insert', $node->title);
     weixinpay_node_detect($node);
+    if($node->type == 'wx_user' && $node->status == 1){
+      variable_set('ch_wxuser', time());
+    }
 }
+
 function weixinpay_node_detect($node){
-  if($node->type == 'nozzle'){
+  if($node->type == 'nozzle' && $node->status == 1){
     variable_set('ch_nozzle', time());
+    return;
   }
-  if($node->type == 'pay_record'){
+  if($node->type == 'pay_record' && $node->status == 1){
     variable_set('ch_record', time());
+    return;
   }
+
 }
 function weixinpay_taxonomy_term_update($term){
   weixinpay_term_detect($term);
@@ -149,17 +191,22 @@ function weixinpay_term_detect($term){
   }
 }
 
-function weixinpay_node_access($node, $op, $account){
-  if($op == 'delete' && $node->type == 'nozzle'){
-
-    return NODE_ACCESS_DENY;
+function weixinpay_wxuser_mark($node){
+  if($node->type == 'wx_user'){
+    $changes = variable_get('wexuser_changed', array());
+    $changes[] = $node->nid;
+    variable_set('wexuser_changed', $changes);
   }
 }
-function weixinpay_taxonomy_term_access($term, $op, $account){
 
-}
-function weixinpay_taxonomy_term_grants($account, $op){
-
-
-
+function weixinpay_menu_alter(&$items){
+   foreach($items as $path => &$item){
+     if($item['module'] == 'weixinpay'){
+       $callback = $item['page callback'];
+       $arguments = isset($item['page arguments'])? $item['page arguments']: array();
+       array_unshift($arguments, $callback);
+       $item['page arguments'] = $arguments;
+       $item['page callback'] = 'weixin_request_callback_wrapper';
+     }
+   }
 }

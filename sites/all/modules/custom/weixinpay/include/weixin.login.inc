@@ -1,35 +1,21 @@
 <?php
 require 'sites/all/libraries/php-jwt/vendor/autoload.php';
 use \Firebase\JWT\JWT;
-function weixin_login_callback(){
+function weixin_user_init_callback(){
   $code = $_POST['code'];
-  $c_jwt = $_POST['c_jwt'];
   $session = weixinpay_get_session($code);
   $openid = $session->openid;
-  $nid = wxuser_load_id_by_openid($openid);
-  if($nid != FALSE){
-    if($c_jwt){
-      drupal_json_output(array('jwt' => $c_jwt));
-      return;
-    }
-    $node = node_load($nid);
+  if(wxuser_exsits($openid)){
+    $node = wxuser_load_by_openid($openid);
   }else{
-    $node = new stdClass();
-    $node->type = 'wx_user';
-    $node->language = 'und';
-    $node->uid = 1;
-    $node->is_new = TRUE;
-    $node->title = $openid;
-    $node->field_openid['und'][0]['value'] = $openid;
-    node_save($node);
+    $node = create_wxuser_by_openid($openid);
   }
-
   $jwt = jwt_sign_and_issue($node);
-  drupal_json_output(array('jwt' => $jwt));
-
+  drupal_json_output(array('jwt'=> $jwt));
 }
+
 function weixin_setaff_callback(){
-  $jwt = $_POST['jwt'];
+  $jwt = $_SERVER['HTTP_JWT'];
   $decoded = JWT::decode($jwt, KEY, array('HS256'));
   $openid = $decoded->openid;
   $user = wxuser_load_by_openid($openid);
@@ -45,8 +31,8 @@ function weixin_setaff_callback(){
   field_attach_update('node', $user);
   drupal_json_output('success');
 }
-function weixin_user_update_callback(){
-  $jwt = $_POST['jwt'];
+function weixin_set_user_info(){
+  $jwt = $_SERVER['HTTP_JWT'];
   $decoded = JWT::decode($jwt, KEY, array('HS256'));
   $openid = $decoded->openid;
   $user = wxuser_load_by_openid($openid);
@@ -76,9 +62,6 @@ function jwt_sign_and_issue($wxuesr){
     'affiliated' => $affiliated,
     'affiliation' => $affiliation,
     'openid' => $openid,
-    'nid' => $wxuesr->nid,
-    'title' => $wxuesr->title
-
   );
   $jwt = JWT::encode($token, KEY);
   return $jwt;

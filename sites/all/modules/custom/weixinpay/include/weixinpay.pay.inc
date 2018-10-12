@@ -2,7 +2,7 @@
 require 'sites/all/libraries/php-jwt/vendor/autoload.php';
 use \Firebase\JWT\JWT;
 function weixinpay_checkout_pay_callback(){
-  $jwt = $_POST['jwt'];
+  $jwt = $_SERVER['HTTP_JWT'];
   $nozzleNumber = $_POST['nozzle'];
   $decoded = JWT::decode($jwt, KEY, array('HS256'));
   $total_fee_yuan = $_POST['amount'];
@@ -17,7 +17,7 @@ function weixinpay_checkout_pay_callback(){
     'mch_id' => MCH_ID,
     'nonce_str' => $nonce_str,
     'body' => $body,
-    'out_trade_no' => format_date(time(), 'custom', 'YmdHis') . '_' . rand(1000, 9999),
+    'out_trade_no' => rand(100000, 999999) . format_date(time(), 'custom', 'YmdHis'),
     'total_fee' => $total_fee,
     'spbill_create_ip' => '127.0.0.1',
     'notify_url' => variable_get('notify_url'),
@@ -47,6 +47,7 @@ function weixinpay_checkout_pay_callback(){
   $pay_record->type = 'pay_record';
   node_object_prepare($pay_record);
   $pay_record->is_new = TRUE;
+  $pay_record->status = 0;
 
   $pay_record->language = 'und';
   $pay_record->uid = 1;

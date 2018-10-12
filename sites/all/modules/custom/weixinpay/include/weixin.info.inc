@@ -1,5 +1,6 @@
 <?php
 function weixin_getprice_callback(){
+  //$jwt = $_SERVER['HTTP_JWT']; // READY TO USE
   $query = new EntityFieldQuery();
   $result = $query->entityCondition('entity_type', 'taxonomy_term')
         ->propertyCondition('vid', '2')
