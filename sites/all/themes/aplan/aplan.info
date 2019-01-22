@@ -1,3 +1,4 @@
 name = Aplan theme
 description = Aplan theme
+stylesheets[all][] = style.css
 core = 7.x
