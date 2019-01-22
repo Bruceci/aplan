@@ -6,6 +6,9 @@ const MCH_KEY = '34r4eju78io986543ju8765r87uvbnx6';
 const UNIFIED_API =  'https://api.mch.weixin.qq.com/pay/unifiedorder';
 const SESSION_API = 'https://api.weixin.qq.com/sns/jscode2session';
 const KEY = '1234567890';
+const TENCENT_LBS_KEY = 'FDUBZ-MO4RV-ZU5PX-U3E4R-P6T7Z-NKBKQ';
+const TENCENT_LBS_GEOCODER_URL = 'https://apis.map.qq.com/ws/geocoder/v1/';
+const TENCENT_LBS_PLACE_URL = 'https://apis.map.qq.com/ws/place/v1/search';
 variable_set('notify_url', 'https://0376866.com/wait_notify');
 include 'utility/utility.inc';
 include 'common/common.inc';
@@ -94,9 +97,25 @@ function weixinpay_menu(){
     'file' => 'weixin.settings.inc',
     'file path' => drupal_get_path('module', 'weixinpay') . '/include'
   );
+  $items['createvehicle'] = array(
+    'title' => 'Create Vehicle',
+    'page callback' => 'weixin_create_vehicle',
+    'access callback' => TRUE,
+    'type' => MENU_CALLBACK,
+    'file' => 'weixin.settings.inc',
+    'file path' => drupal_get_path('module', 'weixinpay') . '/include'
+  );
   $items['deleteinvoice'] = array(
-    'title' => 'Create Invoice',
+    'title' => 'Delete Invoice',
     'page callback' => 'weixin_delete_invoice',
+    'access callback' => TRUE,
+    'type' => MENU_CALLBACK,
+    'file' => 'weixin.settings.inc',
+    'file path' => drupal_get_path('module', 'weixinpay') . '/include'
+  );
+  $items['deletevehicle'] = array(
+    'title' => 'Delet Vehicle',
+    'page callback' => 'weixin_delete_vehicle',
     'access callback' => TRUE,
     'type' => MENU_CALLBACK,
     'file' => 'weixin.settings.inc',
@@ -111,6 +130,15 @@ function weixinpay_menu(){
     'file' => 'weixin.settings.inc',
     'file path' => drupal_get_path('module', 'weixinpay') . '/include'
   );
+  $items['initvehicleinfo'] = array(
+    'title' => 'Init Vehicle Info',
+    'page callback' => 'weixin_initvehicleinfo_callback',
+    'access callback' => TRUE,
+    'type' => MENU_CALLBACK,
+    'file' => 'weixin.settings.inc',
+    'file path' => drupal_get_path('module', 'weixinpay') . '/include'
+  );
+
   $items['confirminvoice'] = array(
     'title' => 'Confirm Invoice',
     'page callback' => 'weixin_confirm_invoice_callback',
@@ -119,18 +147,54 @@ function weixinpay_menu(){
     'file' => 'weixin.settings.inc',
     'file path' => drupal_get_path('module', 'weixinpay') . '/include'
   );
+  $items['confirmvehicle'] = array(
+    'title' => 'Confirm vehicle',
+    'page callback' => 'weixin_confirm_vehicle_callback',
+    'access callback' => TRUE,
+    'type' => MENU_CALLBACK,
+    'file' => 'weixin.settings.inc',
+    'file path' => drupal_get_path('module', 'weixinpay') . '/include'
+  );
+  $items['getcurrentcity'] = array(
+    'title' => 'Get Current City',
+    'page callback' => 'get_current_city_callback',
+    'access callback' => TRUE,
+    'type' => MENU_CALLBACK,
+    'file' => 'qq.tencentlbs.inc',
+    'file path' => drupal_get_path('module', 'weixinpay') . '/include'
+  );
+  $items['mansubmit'] = array(
+    'title' => 'Manual Record Submit',
+    'page callback' => 'manual_record_submit_callback',
+    'access callback' => TRUE,
+    'type' => MENU_CALLBACK,
+    'file' => 'weixin.payrecord.inc',
+    'file path' => drupal_get_path('module', 'weixinpay') . '/include'
+  );
+  $items['metermilesubmit'] = array(
+    'title' => 'MeterMile Submit',
+    'page callback' => 'metermile_submit_callback',
+    'access callback' => TRUE,
+    'type' => MENU_CALLBACK,
+    'file' => 'weixin.payrecord.inc',
+    'file path' => drupal_get_path('module', 'weixinpay') . '/include'
+  );
+
   $items['test'] = array(
     'title' => 'Testing',
     'page callback' => 'test_callback',
     'access callback' => TRUE,
 
   );
+
   return $items;
 }
 
 function test_callback(){
-  $node = node_load(379);
+  $node = node_load(503);
   dpm($node);
+  $metadata = entity_load('record_metadata', array(5));
+  dpm($metadata);
   return 'hello';
 }
 function weixinpay_node_update($node){
@@ -170,7 +234,7 @@ function weixinpay_node_detect($node){
     variable_set('ch_nozzle', time());
     return;
   }
-  if($node->type == 'pay_record' && $node->status == 1){
+  if(in_array($node->type, array('pay_record', 'manual_record')) && $node->status == 1){
     variable_set('ch_record', time());
     return;
   }

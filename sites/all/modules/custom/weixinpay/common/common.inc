@@ -133,3 +133,30 @@ function weixin_request_callback_wrapper(){
   $callback =  array_shift($arguments);
   return call_user_func($callback, ...$arguments);
 }
+function clone_vehicle_to_record_vehicle($vehicle){
+  $recordVehicle = new stdClass();
+  $recordVehicle->type = 'record_vehicle';
+  $recordVehicle->is_new = 1;
+  $recordVehicle->language = 'und';
+  $recordVehicle->uid = 1;
+  $recordVehicle->status = 1;
+  $recordVehicle->title = $vehicle->field_licensenumber['und'][0]['value'];
+  $recordVehicle->field_licensenumber['und'][0]['value'] = $vehicle->field_licensenumber['und'][0]['value'];
+  $recordVehicle->field_fuelconsumption['und'][0]['value'] = $vehicle->field_fuelconsumption['und'][0]['value'];
+  node_save($recordVehicle);
+  return $recordVehicle;
+}
+function load_record_vehicle_by_license($license){
+  $query = new EntityFieldQuery();
+  $query->entityCondition('entity_type', 'node')
+        ->entityCondition('bundle', 'record_vehicle')
+        ->propertyCondition('status', 1)
+        ->fieldCondition('field_licensenumber', 'value', $license);
+
+  $result = $query->execute();
+  if(isset($result['node'])){
+    return reset($result['node']);
+  }else{
+    return FALSE;
+  }
+}

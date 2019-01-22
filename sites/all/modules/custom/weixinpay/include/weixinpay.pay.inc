@@ -34,7 +34,7 @@ function weixinpay_checkout_pay_callback(){
   $oilType = entity_load('taxonomy_term', array($nozzle->field_oiltype['und'][0]['target_id']));
   $oilType = reset($oilType);
   $price = $oilType->field_oilprice['und'][0]['value'];
-
+  $fuelType = $oilType->field_shortname['und'][0]['value'];
   $new_array = array_intersect_key($params, array(
     'out_trade_no' => '',
     'appid' => '',
@@ -59,6 +59,7 @@ function weixinpay_checkout_pay_callback(){
   $pay_record->field_payuser['und'][0]['target_id'] = $wxuser_nid;
   $pay_record->field_recordnozzlenumber['und'][0]['value'] = $nozzleNumber;
   $pay_record->field_price['und'][0]['value'] = $price;
+  $pay_record->field_fueltype['und'][0]['value'] = $fuelType;
   node_save($pay_record);
   $pay_reord_id = $pay_record->nid;
   $params['attach'] = urlencode("pay_record_id=$pay_reord_id");
